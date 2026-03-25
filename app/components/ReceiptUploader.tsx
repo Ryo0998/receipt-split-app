@@ -12,6 +12,7 @@ export default function ReceiptUploader({ onUploadSuccess }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -20,9 +21,12 @@ export default function ReceiptUploader({ onUploadSuccess }: Props) {
     setError(null);
   };
 
+  const getSelectedFile = () =>
+    fileInputRef.current?.files?.[0] ?? cameraInputRef.current?.files?.[0];
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const file = fileInputRef.current?.files?.[0];
+    const file = getSelectedFile();
     if (!file) {
       setError("画像を選択してください");
       return;
@@ -49,6 +53,7 @@ export default function ReceiptUploader({ onUploadSuccess }: Props) {
       onUploadSuccess(receipt);
       setPreview(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
     } catch (err) {
       setError(err instanceof Error ? err.message : "エラーが発生しました");
     } finally {
@@ -57,31 +62,69 @@ export default function ReceiptUploader({ onUploadSuccess }: Props) {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-md p-6">
-      <h2 className="text-xl font-bold text-gray-800 mb-4">レシートをアップロード</h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div
-          className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 transition-colors"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {preview ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="プレビュー" className="max-h-64 mx-auto rounded-lg object-contain" />
-          ) : (
-            <div className="text-gray-400">
-              <div className="text-4xl mb-2">📄</div>
-              <p className="text-sm">クリックして画像を選択</p>
-              <p className="text-xs mt-1">JPG, PNG, WEBP 対応</p>
-            </div>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={handleFileChange}
-          />
+    <div className="bg-white rounded-2xl shadow-md p-5">
+      <h2 className="text-lg font-bold text-gray-800 mb-4">レシートを読み取る</h2>
+      <form onSubmit={handleSubmit} className="space-y-3">
+
+        {/* Camera / file buttons */}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="flex flex-col items-center justify-center gap-1 border-2 border-blue-200 bg-blue-50 rounded-xl py-5 text-blue-700 font-medium active:bg-blue-100 transition-colors"
+          >
+            <span className="text-3xl">📷</span>
+            <span className="text-sm">カメラで撮影</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex flex-col items-center justify-center gap-1 border-2 border-gray-200 bg-gray-50 rounded-xl py-5 text-gray-600 font-medium active:bg-gray-100 transition-colors"
+          >
+            <span className="text-3xl">🖼️</span>
+            <span className="text-sm">画像を選択</span>
+          </button>
         </div>
+
+        {/* Hidden inputs */}
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          capture="environment"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+
+        {/* Preview */}
+        {preview && (
+          <div className="relative">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={preview}
+              alt="プレビュー"
+              className="w-full max-h-56 object-contain rounded-xl bg-gray-100"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setPreview(null);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+                if (cameraInputRef.current) cameraInputRef.current.value = "";
+              }}
+              className="absolute top-2 right-2 bg-black/50 text-white rounded-full w-7 h-7 text-sm leading-none"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {error && (
           <p className="text-red-500 text-sm bg-red-50 rounded-lg px-4 py-2">{error}</p>
@@ -90,11 +133,11 @@ export default function ReceiptUploader({ onUploadSuccess }: Props) {
         <button
           type="submit"
           disabled={loading || !preview}
-          className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-base hover:bg-blue-700 active:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <span className="animate-spin">⏳</span> 解析中...
+              <span className="animate-spin inline-block">⏳</span> 解析中...
             </span>
           ) : (
             "OCR解析・保存"

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ReceiptUploader from "./components/ReceiptUploader";
 import ReceiptCard from "./components/ReceiptCard";
+import InstallBanner from "./components/InstallBanner";
 import type { ReceiptWithItems } from "@/types/receipt";
 
 export default function Home() {
@@ -27,8 +28,9 @@ export default function Home() {
   const totalSpending = receipts.reduce((sum, r) => sum + r.totalAmount, 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-gray-100">
-      <header className="bg-white shadow-sm sticky top-0 z-10">
+    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-gray-100 pb-safe">
+      <InstallBanner />
+      <header className="bg-white shadow-sm sticky top-0 z-10 pt-safe">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-blue-700">レシート管理</h1>

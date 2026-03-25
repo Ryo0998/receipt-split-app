@@ -1,8 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { parseReceiptText } from "@/app/lib/parseReceipt";
-import { preprocessForOCR } from "@/app/lib/imagePreprocess";
 import type { ParsedReceipt } from "@/types/receipt";
 
 type OcrStatus = "idle" | "analyzing" | "done" | "error";
@@ -16,6 +14,14 @@ interface OcrState {
   progress: number;
 }
 
+/**
+ * GPT-4o-mini Vision API を使ったレシートOCRフック
+ *
+ * 処理フロー:
+ * 1. 画像をサーバーの /api/ocr に送信
+ * 2. サーバーが GPT-4o-mini にレシート画像を送り、JSON で解析結果を取得
+ * 3. 解析結果を ParsedReceipt 型で返す
+ */
 export function useOCR() {
   const [state, setState] = useState<OcrState>({
     status: "idle",
@@ -36,68 +42,55 @@ export function useOCR() {
       progress: 0,
     });
 
-    let blobUrl: string | null = null;
-
     try {
-      // ---- Step 1: リサイズ（Blob URL を返す）----
-      setState((p) => ({ ...p, progress: 3 }));
-      blobUrl = await preprocessForOCR(file);
-      setState((p) => ({ ...p, progress: 8 }));
-
-      // ---- Step 2: Tesseract.js OCR ----
-      const Tesseract = await import("tesseract.js");
+      // プログレス表示（API呼び出しは進捗が取れないので疑似的に進める）
       setState((p) => ({ ...p, progress: 10 }));
 
-      const worker = await Tesseract.createWorker("jpn", Tesseract.OEM.LSTM_ONLY, {
-        logger: (m: { status: string; progress: number }) => {
-          if (m.status === "recognizing text") {
-            setState((p) => ({
-              ...p,
-              progress: 15 + Math.round(m.progress * 75),
-            }));
-          }
-        },
+      const fd = new FormData();
+      fd.append("image", file);
+
+      // 疑似プログレスバー（API応答を待つ間）
+      const progressInterval = setInterval(() => {
+        setState((p) => ({
+          ...p,
+          progress: Math.min(p.progress + 5, 85),
+        }));
+      }, 800);
+
+      const res = await fetch("/api/ocr", {
+        method: "POST",
+        body: fd,
       });
 
-      const { data } = await worker.recognize(blobUrl);
-      await worker.terminate();
+      clearInterval(progressInterval);
+      setState((p) => ({ ...p, progress: 90 }));
 
-      // Blob URL を解放
-      URL.revokeObjectURL(blobUrl);
-      blobUrl = null;
-
-      console.log("[useOCR] Confidence:", data.confidence);
-      console.log("[useOCR] Raw text:\n", data.text);
-      setState((p) => ({ ...p, progress: 93 }));
-
-      // ---- Step 3: 画像アップロード（失敗しても続行）----
-      let imageUrl: string | null = null;
-      try {
-        const fd = new FormData();
-        fd.append("image", file);
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        if (res.ok) ({ imageUrl } = await res.json());
-      } catch {
-        /* 非致命的 */
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: `サーバーエラー (${res.status})` }));
+        throw new Error(errData.error || `サーバーエラー (${res.status})`);
       }
 
-      // ---- Step 4: テキスト解析 ----
-      const parsed = parseReceiptText(data.text);
+      const data = await res.json();
+      setState((p) => ({ ...p, progress: 95 }));
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      const parsed: ParsedReceipt = data.parsed;
+      const imageUrl: string | null = data.imageUrl || null;
+
       console.log("[useOCR] Parsed:", parsed);
 
       setState({
         status: "done",
         parsed,
-        rawText: data.text,
+        rawText: JSON.stringify(parsed, null, 2),
         imageUrl,
         error: null,
         progress: 100,
       });
     } catch (err) {
-      // Blob URL が残っていたら解放
-      if (blobUrl) {
-        try { URL.revokeObjectURL(blobUrl); } catch { /* noop */ }
-      }
       const msg = err instanceof Error ? err.message : "OCRエラーが発生しました";
       console.error("[useOCR] Error:", err);
       setState({

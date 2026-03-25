@@ -5,10 +5,11 @@ import { useRef, useState } from "react";
 interface Props {
   onAnalyze: (file: File) => void;
   analyzing: boolean;
+  progress: number;
   error: string | null;
 }
 
-export default function ReceiptInputSection({ onAnalyze, analyzing, error }: Props) {
+export default function ReceiptInputSection({ onAnalyze, analyzing, progress, error }: Props) {
   const [preview, setPreview] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -72,13 +73,34 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, error }: Pro
               alt="プレビュー"
               className="w-full max-h-56 object-contain rounded-xl bg-gray-100"
             />
-            <button
-              type="button"
-              onClick={clearSelection}
-              className="absolute top-2 right-2 bg-black/50 text-white rounded-full w-7 h-7 text-sm leading-none"
-            >
-              ✕
-            </button>
+            {!analyzing && (
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="absolute top-2 right-2 bg-black/50 text-white rounded-full w-7 h-7 text-sm leading-none"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* プログレスバー */}
+        {analyzing && (
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>iPhone上でOCR解析中...</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-400 text-center">
+              初回は言語データの読み込みで1〜2分かかります
+            </p>
           </div>
         )}
 
@@ -92,15 +114,9 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, error }: Pro
         <button
           type="submit"
           disabled={analyzing || !selectedFile}
-          className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-base active:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {analyzing ? (
-            <span className="flex items-center justify-center gap-2">
-              <span className="animate-spin inline-block">⏳</span> AI解析中...
-            </span>
-          ) : (
-            "OCR解析"
-          )}
+          {analyzing ? `解析中... ${progress}%` : "OCR解析"}
         </button>
       </form>
     </div>

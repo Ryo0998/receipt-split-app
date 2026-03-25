@@ -6,22 +6,24 @@ import ReceiptInputSection from "./components/ReceiptInputSection";
 import OCRResultSection from "./components/OCRResultSection";
 import SplitBillSection from "./components/SplitBillSection";
 import HistoryListSection from "./components/HistoryListSection";
+import AggregationSection from "./components/AggregationSection";
 import { useOCR } from "./hooks/useOCR";
 import { useReceiptHistory } from "./hooks/useReceiptHistory";
 import type { ParsedReceipt } from "@/types/receipt";
 
+type Tab = "scan" | "history" | "summary";
+
 export default function Home() {
   const ocr = useOCR();
   const history = useReceiptHistory();
-  // Track whether the OCR result has been saved (to keep SplitBillSection alive)
+  const [tab, setTab] = useState<Tab>("scan");
   const [savedParsed, setSavedParsed] = useState<{
     parsed: ParsedReceipt;
     imageUrl: string | null;
   } | null>(null);
 
-  const totalSpending = history.receipts.reduce((sum, r) => sum + r.totalAmount, 0);
+  const totalSpending = history.receipts.reduce((s, r) => s + r.totalAmount, 0);
 
-  // Called from OCRResultSection "保存する"
   const handleSave = async (parsed: ParsedReceipt, imageUrl: string | null) => {
     await history.save({
       storeName: parsed.storeName,
@@ -34,7 +36,6 @@ export default function Home() {
     setSavedParsed({ parsed, imageUrl });
   };
 
-  // Called from SplitBillSection "割り勘結果を保存"
   const handleSaveWithSplit = async (
     parsed: ParsedReceipt,
     imageUrl: string | null,
@@ -55,64 +56,102 @@ export default function Home() {
     setSavedParsed(null);
   };
 
-  // The parsed data to show in SplitBillSection
-  // After save, use the confirmed data so SplitBillSection stays in sync
   const splitParsed = savedParsed?.parsed ?? ocr.parsed;
   const splitImageUrl = savedParsed?.imageUrl ?? ocr.imageUrl;
+
+  const TABS: { id: Tab; label: string; badge?: number }[] = [
+    { id: "scan", label: "📷 読み取り" },
+    { id: "history", label: "📋 履歴", badge: history.receipts.length },
+    { id: "summary", label: "📊 集計" },
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-gray-100 pb-safe">
       <InstallBanner />
 
+      {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-10 pt-safe">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-blue-700">レシート管理</h1>
-            <p className="text-xs text-gray-400">OCRで自動解析・記録</p>
+            <h1 className="text-xl font-bold text-blue-700">レシート管理</h1>
+            <p className="text-xs text-gray-400">APIキー不要・無料</p>
           </div>
           {history.receipts.length > 0 && (
             <div className="text-right">
-              <p className="text-xs text-gray-400">合計支出</p>
-              <p className="text-lg font-bold text-gray-800">
+              <p className="text-xs text-gray-400">総支出</p>
+              <p className="text-base font-bold text-gray-800">
                 ¥{totalSpending.toLocaleString("ja-JP")}
               </p>
             </div>
           )}
         </div>
+
+        {/* Tab bar */}
+        <div className="max-w-2xl mx-auto flex border-t border-gray-100">
+          {TABS.map(({ id, label, badge }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors relative ${
+                tab === id
+                  ? "text-blue-600 border-b-2 border-blue-600"
+                  : "text-gray-500"
+              }`}
+            >
+              {label}
+              {badge !== undefined && badge > 0 && (
+                <span className="ml-1 bg-blue-100 text-blue-600 text-xs rounded-full px-1.5">
+                  {badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {/* Phase 1 + 2: Input → Analyze → Confirm → Save */}
-        {ocr.status !== "done" ? (
-          <ReceiptInputSection
-            onAnalyze={ocr.analyze}
-            analyzing={ocr.status === "analyzing"}
-            error={ocr.error}
-          />
-        ) : (
-          <OCRResultSection
-            parsed={ocr.parsed!}
-            imageUrl={ocr.imageUrl}
-            onSave={handleSave}
-            onCancel={handleCancel}
+      <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
+        {/* 読み取りタブ */}
+        {tab === "scan" && (
+          <>
+            {ocr.status !== "done" ? (
+              <ReceiptInputSection
+                onAnalyze={ocr.analyze}
+                analyzing={ocr.status === "analyzing"}
+                progress={ocr.progress}
+                error={ocr.error}
+              />
+            ) : (
+              <OCRResultSection
+                parsed={ocr.parsed!}
+                imageUrl={ocr.imageUrl}
+                onSave={handleSave}
+                onCancel={handleCancel}
+              />
+            )}
+
+            {ocr.status === "done" && splitParsed && (
+              <SplitBillSection
+                parsed={splitParsed}
+                imageUrl={splitImageUrl}
+                onSaveWithSplit={handleSaveWithSplit}
+              />
+            )}
+          </>
+        )}
+
+        {/* 履歴タブ */}
+        {tab === "history" && (
+          <HistoryListSection
+            receipts={history.receipts}
+            loading={history.loading}
+            onDelete={history.remove}
           />
         )}
 
-        {/* Phase 3: Split bill — appears as soon as OCR is done */}
-        {ocr.status === "done" && splitParsed && (
-          <SplitBillSection
-            parsed={splitParsed}
-            imageUrl={splitImageUrl}
-            onSaveWithSplit={handleSaveWithSplit}
-          />
+        {/* 集計タブ */}
+        {tab === "summary" && (
+          <AggregationSection receipts={history.receipts} />
         )}
-
-        {/* History */}
-        <HistoryListSection
-          receipts={history.receipts}
-          loading={history.loading}
-          onDelete={history.remove}
-        />
       </main>
     </div>
   );

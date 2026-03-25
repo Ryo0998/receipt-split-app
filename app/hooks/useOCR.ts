@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { parseReceiptText } from "@/app/lib/parseReceipt";
 import type { ParsedReceipt } from "@/types/receipt";
 
 type OcrStatus = "idle" | "analyzing" | "done" | "error";
@@ -10,48 +11,75 @@ interface OcrState {
   parsed: ParsedReceipt | null;
   imageUrl: string | null;
   error: string | null;
+  progress: number; // 0-100
 }
 
+/**
+ * iPhone（ブラウザ）上でTesseract.jsを実行するフック
+ * サーバー不要・APIキー不要・完全無料
+ */
 export function useOCR() {
   const [state, setState] = useState<OcrState>({
     status: "idle",
     parsed: null,
     imageUrl: null,
     error: null,
+    progress: 0,
   });
 
   const analyze = async (file: File) => {
-    console.log("[useOCR] Starting analysis for:", file.name);
-    setState({ status: "analyzing", parsed: null, imageUrl: null, error: null });
+    setState({ status: "analyzing", parsed: null, imageUrl: null, error: null, progress: 0 });
+
+    const previewUrl = URL.createObjectURL(file);
 
     try {
-      const formData = new FormData();
-      formData.append("image", file);
+      // Dynamic import to avoid SSR
+      const { createWorker } = await import("tesseract.js");
 
-      const res = await fetch("/api/ocr", { method: "POST", body: formData });
-      const data = await res.json();
+      setState((prev) => ({ ...prev, progress: 5 }));
 
-      if (!res.ok) {
-        throw new Error(data.error ?? "OCR解析に失敗しました");
+      const worker = await createWorker("jpn", 1, {
+        logger: (m: { status: string; progress: number }) => {
+          if (m.status === "recognizing text") {
+            setState((prev) => ({
+              ...prev,
+              progress: 10 + Math.round(m.progress * 85),
+            }));
+          }
+        },
+      });
+
+      const { data } = await worker.recognize(previewUrl);
+      await worker.terminate();
+      URL.revokeObjectURL(previewUrl);
+
+      console.log("[useOCR] Raw text:\n", data.text.slice(0, 400));
+
+      // 画像をサーバーに保存（失敗しても続行）
+      let imageUrl: string | null = null;
+      try {
+        const fd = new FormData();
+        fd.append("image", file);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (res.ok) ({ imageUrl } = await res.json());
+      } catch {
+        // 画像保存失敗は非致命的
       }
 
-      console.log("[useOCR] Success:", data.parsed);
-      setState({
-        status: "done",
-        parsed: data.parsed,
-        imageUrl: data.imageUrl,
-        error: null,
-      });
+      const parsed = parseReceiptText(data.text);
+      console.log("[useOCR] Parsed:", parsed);
+
+      setState({ status: "done", parsed, imageUrl, error: null, progress: 100 });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "エラーが発生しました";
+      const msg = err instanceof Error ? err.message : "OCRエラーが発生しました";
       console.error("[useOCR] Error:", err);
-      setState({ status: "error", parsed: null, imageUrl: null, error: msg });
+      URL.revokeObjectURL(previewUrl);
+      setState({ status: "error", parsed: null, imageUrl: null, error: msg, progress: 0 });
     }
   };
 
-  const reset = () => {
-    setState({ status: "idle", parsed: null, imageUrl: null, error: null });
-  };
+  const reset = () =>
+    setState({ status: "idle", parsed: null, imageUrl: null, error: null, progress: 0 });
 
   return { ...state, analyze, reset };
 }

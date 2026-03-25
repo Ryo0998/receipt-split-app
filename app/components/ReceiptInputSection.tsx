@@ -40,26 +40,31 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, progress, er
       <h2 className="text-lg font-bold text-gray-800 mb-4">レシートを読み取る</h2>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <label className="flex flex-col items-center justify-center gap-1 border-2 border-blue-200 bg-blue-50 rounded-xl py-5 text-blue-700 font-medium active:bg-blue-100 transition-colors cursor-pointer">
-            <span className="text-3xl">📷</span>
-            <span className="text-sm">カメラで撮影</span>
+          {/* カメラ撮影ボタン */}
+          {/* iOS Safari では display:none の input が onChange を発火しないバグがあるため
+              input を label 内に absolute で重ね、opacity-0 で視覚的に隠す */}
+          <label className="relative flex flex-col items-center justify-center gap-1 border-2 border-blue-200 bg-blue-50 rounded-xl py-5 text-blue-700 font-medium active:bg-blue-100 transition-colors cursor-pointer overflow-hidden">
+            <span className="text-3xl pointer-events-none">📷</span>
+            <span className="text-sm pointer-events-none">カメラで撮影</span>
             <input
               ref={cameraInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/*"
               capture="environment"
-              className="hidden"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               onChange={handleFileChange}
             />
           </label>
-          <label className="flex flex-col items-center justify-center gap-1 border-2 border-gray-200 bg-gray-50 rounded-xl py-5 text-gray-600 font-medium active:bg-gray-100 transition-colors cursor-pointer">
-            <span className="text-3xl">🖼️</span>
-            <span className="text-sm">画像を選択</span>
+
+          {/* ライブラリ選択ボタン */}
+          <label className="relative flex flex-col items-center justify-center gap-1 border-2 border-gray-200 bg-gray-50 rounded-xl py-5 text-gray-600 font-medium active:bg-gray-100 transition-colors cursor-pointer overflow-hidden">
+            <span className="text-3xl pointer-events-none">🖼️</span>
+            <span className="text-sm pointer-events-none">画像を選択</span>
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
+              accept="image/*"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               onChange={handleFileChange}
             />
           </label>
@@ -111,12 +116,17 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, progress, er
           </div>
         )}
 
+        {/* 写真選択後にプレビューが出たらボタンが押せる */}
         <button
           type="submit"
           disabled={analyzing || !selectedFile}
           className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {analyzing ? `解析中... ${progress}%` : "OCR解析"}
+          {analyzing
+            ? `解析中... ${progress}%`
+            : selectedFile
+              ? "OCR解析する"
+              : "📷 写真を選んでください"}
         </button>
       </form>
     </div>

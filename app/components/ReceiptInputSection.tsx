@@ -20,6 +20,8 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, progress, er
     if (!file) return;
     setPreview(URL.createObjectURL(file));
     setSelectedFile(file);
+    // 写真を選択したら自動的にOCR開始
+    onAnalyze(file);
   };
 
   const clearSelection = () => {
@@ -40,9 +42,6 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, progress, er
       <h2 className="text-lg font-bold text-gray-800 mb-4">レシートを読み取る</h2>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          {/* カメラ撮影ボタン */}
-          {/* iOS Safari では display:none の input が onChange を発火しないバグがあるため
-              input を label 内に absolute で重ね、opacity-0 で視覚的に隠す */}
           <label className="relative flex flex-col items-center justify-center gap-1 border-2 border-blue-200 bg-blue-50 rounded-xl py-5 text-blue-700 font-medium active:bg-blue-100 transition-colors cursor-pointer overflow-hidden">
             <span className="text-3xl pointer-events-none">📷</span>
             <span className="text-sm pointer-events-none">カメラで撮影</span>
@@ -56,7 +55,6 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, progress, er
             />
           </label>
 
-          {/* ライブラリ選択ボタン */}
           <label className="relative flex flex-col items-center justify-center gap-1 border-2 border-gray-200 bg-gray-50 rounded-xl py-5 text-gray-600 font-medium active:bg-gray-100 transition-colors cursor-pointer overflow-hidden">
             <span className="text-3xl pointer-events-none">🖼️</span>
             <span className="text-sm pointer-events-none">画像を選択</span>
@@ -70,7 +68,7 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, progress, er
           </label>
         </div>
 
-        {preview && (
+        {preview && !analyzing && !error && (
           <div className="relative">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -78,56 +76,59 @@ export default function ReceiptInputSection({ onAnalyze, analyzing, progress, er
               alt="プレビュー"
               className="w-full max-h-56 object-contain rounded-xl bg-gray-100"
             />
-            {!analyzing && (
-              <button
-                type="button"
-                onClick={clearSelection}
-                className="absolute top-2 right-2 bg-black/50 text-white rounded-full w-7 h-7 text-sm leading-none"
-              >
-                ✕
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="absolute top-2 right-2 bg-black/50 text-white rounded-full w-7 h-7 text-sm leading-none"
+            >
+              ✕
+            </button>
           </div>
         )}
 
-        {/* プログレスバー */}
         {analyzing && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <div className="flex justify-between text-xs text-gray-500">
-              <span>iPhone上でOCR解析中...</span>
+              <span>OCR解析中...</span>
               <span>{progress}%</span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
               <div
-                className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                className="bg-blue-500 h-2.5 rounded-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="text-xs text-gray-400 text-center">
-              初回は言語データの読み込みで1〜2分かかります
-            </p>
+            {progress < 15 && (
+              <p className="text-xs text-gray-400 text-center">
+                初回は言語データの読み込みで1〜2分かかります
+              </p>
+            )}
           </div>
         )}
 
         {error && (
           <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-xl px-4 py-3">
             <p className="font-medium">エラーが発生しました</p>
-            <p className="mt-1 text-xs">{error}</p>
+            <p className="mt-1 text-xs break-all">{error}</p>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="mt-2 text-xs text-red-500 underline"
+            >
+              やり直す
+            </button>
           </div>
         )}
 
-        {/* 写真選択後にプレビューが出たらボタンが押せる */}
-        <button
-          type="submit"
-          disabled={analyzing || !selectedFile}
-          className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-base disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          {analyzing
-            ? `解析中... ${progress}%`
-            : selectedFile
-              ? "OCR解析する"
-              : "📷 写真を選んでください"}
-        </button>
+        {/* 自動解析されなかった場合の手動ボタン */}
+        {selectedFile && !analyzing && (
+          <button
+            type="submit"
+            className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-base transition-colors active:bg-blue-700"
+          >
+            もう一度OCR解析する
+          </button>
+        )}
       </form>
     </div>
   );

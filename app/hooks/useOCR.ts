@@ -13,17 +13,9 @@ interface OcrState {
   rawText: string | null;
   imageUrl: string | null;
   error: string | null;
-  progress: number; // 0-100
+  progress: number;
 }
 
-/**
- * iPhone（ブラウザ）上でTesseract.jsを実行するフック
- *
- * 処理フロー:
- * 1. リサイズ + グレースケール + コントラスト強調（2値化はしない）
- * 2. Tesseract.js jpn（best_intモデル自動使用）PSM=AUTO
- * 3. parseReceiptText でレシート情報を抽出
- */
 export function useOCR() {
   const [state, setState] = useState<OcrState>({
     status: "idle",
@@ -35,51 +27,50 @@ export function useOCR() {
   });
 
   const analyze = async (file: File) => {
-    setState({ status: "analyzing", parsed: null, rawText: null, imageUrl: null, error: null, progress: 0 });
+    setState({
+      status: "analyzing",
+      parsed: null,
+      rawText: null,
+      imageUrl: null,
+      error: null,
+      progress: 0,
+    });
+
+    let blobUrl: string | null = null;
 
     try {
-      // ---- Step 1: 画像前処理（リサイズ + グレースケール + コントラスト）----
-      // ※2値化はTesseractの内部Sauvola法に任せる
-      setState((prev) => ({ ...prev, progress: 3 }));
-      let processedDataUrl: string;
-      try {
-        processedDataUrl = await preprocessForOCR(file);
-        setState((prev) => ({ ...prev, progress: 10 }));
-      } catch (prepErr) {
-        console.warn("[useOCR] Preprocessing failed, using original:", prepErr);
-        processedDataUrl = URL.createObjectURL(file);
-        setState((prev) => ({ ...prev, progress: 10 }));
-      }
+      // ---- Step 1: リサイズ（Blob URL を返す）----
+      setState((p) => ({ ...p, progress: 3 }));
+      blobUrl = await preprocessForOCR(file);
+      setState((p) => ({ ...p, progress: 8 }));
 
       // ---- Step 2: Tesseract.js OCR ----
-      // v7はLSTMモード時にbest_int（高精度）モデルを自動使用
-      const { createWorker, PSM } = await import("tesseract.js");
+      const Tesseract = await import("tesseract.js");
+      setState((p) => ({ ...p, progress: 10 }));
 
-      const worker = await createWorker("jpn", 1, {
+      const worker = await Tesseract.createWorker("jpn", Tesseract.OEM.LSTM_ONLY, {
         logger: (m: { status: string; progress: number }) => {
           if (m.status === "recognizing text") {
-            setState((prev) => ({
-              ...prev,
+            setState((p) => ({
+              ...p,
               progress: 15 + Math.round(m.progress * 75),
             }));
           }
         },
       });
 
-      // PSM.AUTO: Tesseractにレイアウト自動判定させる
-      // （レシートは1カラムだが、AUTO の方が行認識が安定する場合がある）
-      await worker.setParameters({
-        tessedit_pageseg_mode: PSM.AUTO,
-      });
-
-      const { data } = await worker.recognize(processedDataUrl);
+      const { data } = await worker.recognize(blobUrl);
       await worker.terminate();
 
-      console.log("[useOCR] Raw OCR text:\n", data.text);
-      console.log("[useOCR] Confidence:", data.confidence);
-      setState((prev) => ({ ...prev, progress: 92 }));
+      // Blob URL を解放
+      URL.revokeObjectURL(blobUrl);
+      blobUrl = null;
 
-      // ---- Step 3: 画像をサーバーに保存（失敗しても続行）----
+      console.log("[useOCR] Confidence:", data.confidence);
+      console.log("[useOCR] Raw text:\n", data.text);
+      setState((p) => ({ ...p, progress: 93 }));
+
+      // ---- Step 3: 画像アップロード（失敗しても続行）----
       let imageUrl: string | null = null;
       try {
         const fd = new FormData();
@@ -87,22 +78,48 @@ export function useOCR() {
         const res = await fetch("/api/upload", { method: "POST", body: fd });
         if (res.ok) ({ imageUrl } = await res.json());
       } catch {
-        // 画像保存失敗は非致命的
+        /* 非致命的 */
       }
 
+      // ---- Step 4: テキスト解析 ----
       const parsed = parseReceiptText(data.text);
       console.log("[useOCR] Parsed:", parsed);
 
-      setState({ status: "done", parsed, rawText: data.text, imageUrl, error: null, progress: 100 });
+      setState({
+        status: "done",
+        parsed,
+        rawText: data.text,
+        imageUrl,
+        error: null,
+        progress: 100,
+      });
     } catch (err) {
+      // Blob URL が残っていたら解放
+      if (blobUrl) {
+        try { URL.revokeObjectURL(blobUrl); } catch { /* noop */ }
+      }
       const msg = err instanceof Error ? err.message : "OCRエラーが発生しました";
       console.error("[useOCR] Error:", err);
-      setState({ status: "error", parsed: null, rawText: null, imageUrl: null, error: msg, progress: 0 });
+      setState({
+        status: "error",
+        parsed: null,
+        rawText: null,
+        imageUrl: null,
+        error: msg,
+        progress: 0,
+      });
     }
   };
 
   const reset = () =>
-    setState({ status: "idle", parsed: null, rawText: null, imageUrl: null, error: null, progress: 0 });
+    setState({
+      status: "idle",
+      parsed: null,
+      rawText: null,
+      imageUrl: null,
+      error: null,
+      progress: 0,
+    });
 
   return { ...state, analyze, reset };
 }

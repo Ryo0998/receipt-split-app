@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getAllReceipts, saveReceipt, deleteReceipt } from "@/app/lib/db";
 import type { ReceiptWithItems, ParsedItem } from "@/types/receipt";
 
 interface SaveParams {
@@ -12,34 +13,32 @@ interface SaveParams {
   rawJson?: string;
 }
 
+/**
+ * iPhone の IndexedDB を使ってレシート履歴を管理する
+ * サーバー不要・オフライン動作
+ */
 export function useReceiptHistory() {
   const [receipts, setReceipts] = useState<ReceiptWithItems[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/receipts")
-      .then((r) => r.json())
-      .then(({ receipts }) => setReceipts(receipts ?? []))
-      .catch((e) => console.error("[useReceiptHistory] Fetch error:", e))
+    getAllReceipts()
+      .then(setReceipts)
+      .catch((e) => console.error("[useReceiptHistory] Load error:", e))
       .finally(() => setLoading(false));
   }, []);
 
   const save = async (params: SaveParams): Promise<ReceiptWithItems> => {
-    console.log("[useReceiptHistory] Saving:", params.storeName);
-    const res = await fetch("/api/receipts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+    const receipt = await saveReceipt({
+      ...params,
+      rawJson: params.rawJson ?? "{}",
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "保存に失敗しました");
-    setReceipts((prev) => [data.receipt, ...prev]);
-    return data.receipt;
+    setReceipts((prev) => [receipt, ...prev]);
+    return receipt;
   };
 
   const remove = async (id: number) => {
-    const res = await fetch(`/api/receipts/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("削除に失敗しました");
+    await deleteReceipt(id);
     setReceipts((prev) => prev.filter((r) => r.id !== id));
   };
 

@@ -1,21 +1,91 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import Tesseract from "tesseract.js";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
-import type { ParsedReceipt } from "@/types/receipt";
+import type { ParsedReceipt, ParsedItem } from "@/types/receipt";
 
+// ----------------------------------------------------------------
+// Parse raw OCR text into structured receipt data
+// ----------------------------------------------------------------
+function parseReceiptText(raw: string): ParsedReceipt {
+  const lines = raw
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  // --- Total amount ---
+  let totalAmount = 0;
+  const totalKeywords = ["合計", "税込合計", "総合計", "お会計", "お支払", "合  計", "ごうけい"];
+  for (const line of lines) {
+    if (totalKeywords.some((kw) => line.includes(kw))) {
+      const m = line.match(/(\d[\d,]+)/);
+      if (m) {
+        totalAmount = parseInt(m[1].replace(/,/g, ""), 10);
+        break;
+      }
+    }
+  }
+  // Fallback: largest plausible number on the receipt
+  if (totalAmount === 0) {
+    let max = 0;
+    for (const line of lines) {
+      for (const m of line.matchAll(/(\d[\d,]{2,})/g)) {
+        const v = parseInt(m[1].replace(/,/g, ""), 10);
+        if (v > max && v < 999_999) max = v;
+      }
+    }
+    totalAmount = max;
+  }
+
+  // --- Date ---
+  let receiptDate: string | null = null;
+  for (const line of lines) {
+    // 2024年12月31日 / 2024/12/31 / 2024-12-31
+    const m1 = line.match(/(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})/);
+    if (m1) {
+      receiptDate = `${m1[1]}-${m1[2].padStart(2, "0")}-${m1[3].padStart(2, "0")}`;
+      break;
+    }
+    // 24/12/31
+    const m2 = line.match(/^(\d{2})\/(\d{1,2})\/(\d{1,2})$/);
+    if (m2) {
+      receiptDate = `20${m2[1]}-${m2[2].padStart(2, "0")}-${m2[3].padStart(2, "0")}`;
+      break;
+    }
+  }
+
+  // --- Store name: first line that isn't purely digits / dates ---
+  let storeName = "不明";
+  for (const line of lines) {
+    if (line.length >= 2 && !/^[\d\s\-\/年月日時:,.]+$/.test(line)) {
+      storeName = line;
+      break;
+    }
+  }
+
+  // --- Items: lines matching "<name>  <price>" ---
+  const items: ParsedItem[] = [];
+  const skipRe = /合計|小計|税|値引|割引|おつり|お預|ポイント|レシート|領収|電話|住所|TEL/;
+  for (const line of lines) {
+    if (skipRe.test(line)) continue;
+    const m = line.match(/^(.+?)\s{1,}(\d[\d,]*)\s*$/);
+    if (m) {
+      const name = m[1].trim();
+      const price = parseInt(m[2].replace(/,/g, ""), 10);
+      if (name.length >= 1 && price > 0 && price < totalAmount * 1.5 + 1) {
+        items.push({ name, price, quantity: 1 });
+      }
+    }
+  }
+
+  return { storeName, receiptDate, totalAmount, items };
+}
+
+// ----------------------------------------------------------------
+// API route
+// ----------------------------------------------------------------
 export async function POST(request: NextRequest) {
   try {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return NextResponse.json(
-        {
-          error:
-            ".envファイルにANTHROPIC_API_KEYが設定されていません。設定後にサーバーを再起動してください。",
-        },
-        { status: 500 }
-      );
-    }
-
     const formData = await request.formData();
     const file = formData.get("image") as File | null;
 
@@ -23,7 +93,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "画像ファイルが必要です" }, { status: 400 });
     }
 
-    // Save image to public/uploads/
+    // Save uploaded image
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const uploadsDir = path.join(process.cwd(), "public", "uploads");
@@ -33,66 +103,23 @@ export async function POST(request: NextRequest) {
     await writeFile(path.join(uploadsDir, fileName), buffer);
     const imageUrl = `/uploads/${fileName}`;
 
-    // Claude Vision OCR
-    const base64Image = buffer.toString("base64");
-    const mediaType = (file.type || "image/jpeg") as
-      | "image/jpeg"
-      | "image/png"
-      | "image/gif"
-      | "image/webp";
+    // Tesseract OCR (Japanese + English for numbers)
+    console.log("[OCR] Starting Tesseract for:", fileName);
+    const langCachePath = path.join(process.cwd(), ".tesseract-cache");
 
-    console.log("[OCR] Analyzing:", fileName);
+    const { data } = await Tesseract.recognize(buffer, "jpn", {
+      cachePath: langCachePath,
+      logger: (m) => {
+        if (m.status === "recognizing text") {
+          process.stdout.write(`\r[OCR] ${Math.round(m.progress * 100)}%`);
+        }
+      },
+    } as Parameters<typeof Tesseract.recognize>[2]);
 
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    console.log("\n[OCR] Raw text:\n", data.text.slice(0, 600));
 
-    const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: mediaType, data: base64Image },
-            },
-            {
-              type: "text",
-              text: `このレシート画像を解析して、以下のJSON形式で情報を抽出してください。
-必ずJSONのみを返してください（説明文は不要です）。
-
-{
-  "storeName": "店名（不明な場合は「不明」）",
-  "receiptDate": "YYYY-MM-DD形式の日付（不明な場合はnull）",
-  "totalAmount": 合計金額（数値、円単位、不明な場合は0）,
-  "items": [
-    { "name": "商品名", "price": 単価（数値）, "quantity": 数量（数値、デフォルト1） }
-  ]
-}
-
-「合計」「税込合計」「総合計」「お会計」「お支払い」を優先して合計金額として使用してください。`,
-            },
-          ],
-        },
-      ],
-    });
-
-    const responseText =
-      message.content[0].type === "text" ? message.content[0].text : "";
-    console.log("[OCR] Raw response:", responseText.slice(0, 300));
-
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return NextResponse.json(
-        { error: "OCR解析結果の取得に失敗しました。別の画像でお試しください。" },
-        { status: 500 }
-      );
-    }
-
-    const parsed: ParsedReceipt = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed.items)) parsed.items = [];
-
-    console.log("[OCR] Parsed result:", JSON.stringify(parsed));
+    const parsed: ParsedReceipt = parseReceiptText(data.text);
+    console.log("[OCR] Parsed:", JSON.stringify(parsed));
 
     return NextResponse.json({ imageUrl, parsed });
   } catch (err) {

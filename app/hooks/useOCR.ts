@@ -10,7 +10,7 @@ type OcrStatus = "idle" | "analyzing" | "done" | "error";
 interface OcrState {
   status: OcrStatus;
   parsed: ParsedReceipt | null;
-  rawText: string | null; // デバッグ用
+  rawText: string | null;
   imageUrl: string | null;
   error: string | null;
   progress: number; // 0-100
@@ -18,13 +18,11 @@ interface OcrState {
 
 /**
  * iPhone（ブラウザ）上でTesseract.jsを実行するフック
- * サーバー不要・APIキー不要・完全無料
  *
  * 処理フロー:
- * 1. 画像を最大1600pxにリサイズ（メモリ節約）
- * 2. Otsu法で2値化（テキスト/背景を鮮明分離）
- * 3. Tesseract.js jpn+eng で OCR（日本語+英数字）
- * 4. parseReceiptText でレシート情報を抽出
+ * 1. リサイズ + グレースケール + コントラスト強調（2値化はしない）
+ * 2. Tesseract.js jpn（best_intモデル自動使用）PSM=AUTO
+ * 3. parseReceiptText でレシート情報を抽出
  */
 export function useOCR() {
   const [state, setState] = useState<OcrState>({
@@ -40,7 +38,8 @@ export function useOCR() {
     setState({ status: "analyzing", parsed: null, rawText: null, imageUrl: null, error: null, progress: 0 });
 
     try {
-      // ---- Step 1: 画像前処理（リサイズ + Otsu 2値化）----
+      // ---- Step 1: 画像前処理（リサイズ + グレースケール + コントラスト）----
+      // ※2値化はTesseractの内部Sauvola法に任せる
       setState((prev) => ({ ...prev, progress: 3 }));
       let processedDataUrl: string;
       try {
@@ -52,11 +51,11 @@ export function useOCR() {
         setState((prev) => ({ ...prev, progress: 10 }));
       }
 
-      // ---- Step 2: Tesseract.js OCR（日本語 + 英数字）----
+      // ---- Step 2: Tesseract.js OCR ----
+      // v7はLSTMモード時にbest_int（高精度）モデルを自動使用
       const { createWorker, PSM } = await import("tesseract.js");
 
-      // jpn+eng: 日本語テキスト + 数字・記号の精度向上
-      const worker = await createWorker("jpn+eng", 1, {
+      const worker = await createWorker("jpn", 1, {
         logger: (m: { status: string; progress: number }) => {
           if (m.status === "recognizing text") {
             setState((prev) => ({
@@ -67,15 +66,17 @@ export function useOCR() {
         },
       });
 
-      // PSM.SINGLE_COLUMN: 縦長1カラムのレシートに最適
+      // PSM.AUTO: Tesseractにレイアウト自動判定させる
+      // （レシートは1カラムだが、AUTO の方が行認識が安定する場合がある）
       await worker.setParameters({
-        tessedit_pageseg_mode: PSM.SINGLE_COLUMN,
+        tessedit_pageseg_mode: PSM.AUTO,
       });
 
       const { data } = await worker.recognize(processedDataUrl);
       await worker.terminate();
 
       console.log("[useOCR] Raw OCR text:\n", data.text);
+      console.log("[useOCR] Confidence:", data.confidence);
       setState((prev) => ({ ...prev, progress: 92 }));
 
       // ---- Step 3: 画像をサーバーに保存（失敗しても続行）----

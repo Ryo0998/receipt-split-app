@@ -26,3 +26,29 @@ export interface ReceiptWithItems {
     quantity: number;
   }[];
 }
+
+// ---- Split bill types ----
+
+export interface SplitParticipant {
+  id: string;
+  name: string;
+  ratio: number;
+}
+
+export interface SplitBillItem extends ParsedItem {
+  assignedTo: string[]; // participant IDs
+}
+
+export type SplitMode = "equal" | "ratio" | "item";
+
+export interface SplitBillConfig {
+  mode: SplitMode;
+  participants: SplitParticipant[];
+  items: SplitBillItem[];
+}
+
+export interface SplitResult {
+  participantId: string;
+  name: string;
+  amount: number;
+}

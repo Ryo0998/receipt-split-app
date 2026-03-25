@@ -1,42 +1,76 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import ReceiptUploader from "./components/ReceiptUploader";
-import ReceiptCard from "./components/ReceiptCard";
+import { useState } from "react";
 import InstallBanner from "./components/InstallBanner";
-import type { ReceiptWithItems } from "@/types/receipt";
+import ReceiptInputSection from "./components/ReceiptInputSection";
+import OCRResultSection from "./components/OCRResultSection";
+import SplitBillSection from "./components/SplitBillSection";
+import HistoryListSection from "./components/HistoryListSection";
+import { useOCR } from "./hooks/useOCR";
+import { useReceiptHistory } from "./hooks/useReceiptHistory";
+import type { ParsedReceipt } from "@/types/receipt";
 
 export default function Home() {
-  const [receipts, setReceipts] = useState<ReceiptWithItems[]>([]);
-  const [loading, setLoading] = useState(true);
+  const ocr = useOCR();
+  const history = useReceiptHistory();
+  // Track whether the OCR result has been saved (to keep SplitBillSection alive)
+  const [savedParsed, setSavedParsed] = useState<{
+    parsed: ParsedReceipt;
+    imageUrl: string | null;
+  } | null>(null);
 
-  useEffect(() => {
-    fetch("/api/receipts")
-      .then((r) => r.json())
-      .then(({ receipts }) => setReceipts(receipts ?? []))
-      .finally(() => setLoading(false));
-  }, []);
+  const totalSpending = history.receipts.reduce((sum, r) => sum + r.totalAmount, 0);
 
-  const handleUploadSuccess = (receipt: ReceiptWithItems) => {
-    setReceipts((prev) => [receipt, ...prev]);
+  // Called from OCRResultSection "保存する"
+  const handleSave = async (parsed: ParsedReceipt, imageUrl: string | null) => {
+    await history.save({
+      storeName: parsed.storeName,
+      receiptDate: parsed.receiptDate,
+      totalAmount: parsed.totalAmount,
+      imageUrl,
+      items: parsed.items,
+      rawJson: JSON.stringify(parsed),
+    });
+    setSavedParsed({ parsed, imageUrl });
   };
 
-  const handleDelete = (id: number) => {
-    setReceipts((prev) => prev.filter((r) => r.id !== id));
+  // Called from SplitBillSection "割り勘結果を保存"
+  const handleSaveWithSplit = async (
+    parsed: ParsedReceipt,
+    imageUrl: string | null,
+    splitData: object
+  ) => {
+    await history.save({
+      storeName: `${parsed.storeName}（割り勘）`,
+      receiptDate: parsed.receiptDate,
+      totalAmount: parsed.totalAmount,
+      imageUrl,
+      items: parsed.items,
+      rawJson: JSON.stringify({ ...parsed, splitData }),
+    });
   };
 
-  const totalSpending = receipts.reduce((sum, r) => sum + r.totalAmount, 0);
+  const handleCancel = () => {
+    ocr.reset();
+    setSavedParsed(null);
+  };
+
+  // The parsed data to show in SplitBillSection
+  // After save, use the confirmed data so SplitBillSection stays in sync
+  const splitParsed = savedParsed?.parsed ?? ocr.parsed;
+  const splitImageUrl = savedParsed?.imageUrl ?? ocr.imageUrl;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-gray-100 pb-safe">
       <InstallBanner />
+
       <header className="bg-white shadow-sm sticky top-0 z-10 pt-safe">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-blue-700">レシート管理</h1>
             <p className="text-xs text-gray-400">OCRで自動解析・記録</p>
           </div>
-          {receipts.length > 0 && (
+          {history.receipts.length > 0 && (
             <div className="text-right">
               <p className="text-xs text-gray-400">合計支出</p>
               <p className="text-lg font-bold text-gray-800">
@@ -48,38 +82,37 @@ export default function Home() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        <ReceiptUploader onUploadSuccess={handleUploadSuccess} />
+        {/* Phase 1 + 2: Input → Analyze → Confirm → Save */}
+        {ocr.status !== "done" ? (
+          <ReceiptInputSection
+            onAnalyze={ocr.analyze}
+            analyzing={ocr.status === "analyzing"}
+            error={ocr.error}
+          />
+        ) : (
+          <OCRResultSection
+            parsed={ocr.parsed!}
+            imageUrl={ocr.imageUrl}
+            onSave={handleSave}
+            onCancel={handleCancel}
+          />
+        )}
 
-        <section>
-          <h2 className="text-lg font-bold text-gray-700 mb-3">
-            履歴
-            {receipts.length > 0 && (
-              <span className="ml-2 text-sm font-normal text-gray-400">
-                {receipts.length}件
-              </span>
-            )}
-          </h2>
+        {/* Phase 3: Split bill — appears as soon as OCR is done */}
+        {ocr.status === "done" && splitParsed && (
+          <SplitBillSection
+            parsed={splitParsed}
+            imageUrl={splitImageUrl}
+            onSaveWithSplit={handleSaveWithSplit}
+          />
+        )}
 
-          {loading ? (
-            <div className="text-center py-12 text-gray-400">読み込み中...</div>
-          ) : receipts.length === 0 ? (
-            <div className="text-center py-12 text-gray-400 bg-white rounded-2xl shadow-sm">
-              <p className="text-4xl mb-3">🧾</p>
-              <p>まだレシートがありません</p>
-              <p className="text-sm mt-1">上からアップロードして始めましょう</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {receipts.map((receipt) => (
-                <ReceiptCard
-                  key={receipt.id}
-                  receipt={receipt}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+        {/* History */}
+        <HistoryListSection
+          receipts={history.receipts}
+          loading={history.loading}
+          onDelete={history.remove}
+        />
       </main>
     </div>
   );

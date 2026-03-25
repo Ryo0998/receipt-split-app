@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Receipt {
+  id          Int       @id @default(autoincrement())
+  storeName   String
+  receiptDate String?
+  totalAmount Int
+  imageUrl    String?
+  rawJson     String
+  createdAt   DateTime  @default(now())
+  items       Item[]
+}
+
+model Item {
+  id        Int     @id @default(autoincrement())
+  name      String
+  price     Int
+  quantity  Int     @default(1)
+  receiptId Int
+  receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+}

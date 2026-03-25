@@ -22,7 +22,7 @@ export default function ReceiptUploader({ onUploadSuccess }: Props) {
   };
 
   const getSelectedFile = () =>
-    fileInputRef.current?.files?.[0] ?? cameraInputRef.current?.files?.[0];
+    cameraInputRef.current?.files?.[0] ?? fileInputRef.current?.files?.[0];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,40 +68,30 @@ export default function ReceiptUploader({ onUploadSuccess }: Props) {
 
         {/* Camera / file buttons */}
         <div className="grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => cameraInputRef.current?.click()}
-            className="flex flex-col items-center justify-center gap-1 border-2 border-blue-200 bg-blue-50 rounded-xl py-5 text-blue-700 font-medium active:bg-blue-100 transition-colors"
-          >
+          <label className="flex flex-col items-center justify-center gap-1 border-2 border-blue-200 bg-blue-50 rounded-xl py-5 text-blue-700 font-medium active:bg-blue-100 transition-colors cursor-pointer">
             <span className="text-3xl">📷</span>
             <span className="text-sm">カメラで撮影</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="flex flex-col items-center justify-center gap-1 border-2 border-gray-200 bg-gray-50 rounded-xl py-5 text-gray-600 font-medium active:bg-gray-100 transition-colors"
-          >
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </label>
+          <label className="flex flex-col items-center justify-center gap-1 border-2 border-gray-200 bg-gray-50 rounded-xl py-5 text-gray-600 font-medium active:bg-gray-100 transition-colors cursor-pointer">
             <span className="text-3xl">🖼️</span>
             <span className="text-sm">画像を選択</span>
-          </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </label>
         </div>
-
-        {/* Hidden inputs */}
-        <input
-          ref={cameraInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          capture="environment"
-          className="hidden"
-          onChange={handleFileChange}
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="hidden"
-          onChange={handleFileChange}
-        />
 
         {/* Preview */}
         {preview && (

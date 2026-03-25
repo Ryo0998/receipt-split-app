@@ -5,12 +5,14 @@ import type { ParsedReceipt, ParsedItem } from "@/types/receipt";
 
 interface Props {
   parsed: ParsedReceipt;
+  rawText: string | null;
   imageUrl: string | null;
   onSave: (data: ParsedReceipt, imageUrl: string | null) => Promise<void>;
   onCancel: () => void;
 }
 
-export default function OCRResultSection({ parsed, imageUrl, onSave, onCancel }: Props) {
+export default function OCRResultSection({ parsed, rawText, imageUrl, onSave, onCancel }: Props) {
+  const [showRaw, setShowRaw] = useState(false);
   const [storeName, setStoreName] = useState(parsed.storeName);
   const [receiptDate, setReceiptDate] = useState(parsed.receiptDate ?? "");
   const [totalAmount, setTotalAmount] = useState(parsed.totalAmount);
@@ -148,6 +150,24 @@ export default function OCRResultSection({ parsed, imageUrl, onSave, onCancel }:
       {error && (
         <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-xl px-4 py-3">
           {error}
+        </div>
+      )}
+
+      {/* OCR生テキスト（デバッグ用） */}
+      {rawText && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowRaw((v) => !v)}
+            className="text-xs text-gray-400 underline"
+          >
+            {showRaw ? "▲ OCR生テキストを隠す" : "▼ OCR生テキストを確認する"}
+          </button>
+          {showRaw && (
+            <pre className="mt-1 bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-600 overflow-auto max-h-40 whitespace-pre-wrap break-all">
+              {rawText}
+            </pre>
+          )}
         </div>
       )}
 

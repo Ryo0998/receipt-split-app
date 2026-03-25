@@ -10,6 +10,7 @@ type OcrStatus = "idle" | "analyzing" | "done" | "error";
 interface OcrState {
   status: OcrStatus;
   parsed: ParsedReceipt | null;
+  rawText: string | null; // デバッグ用
   imageUrl: string | null;
   error: string | null;
   progress: number; // 0-100
@@ -18,48 +19,55 @@ interface OcrState {
 /**
  * iPhone（ブラウザ）上でTesseract.jsを実行するフック
  * サーバー不要・APIキー不要・完全無料
- * 前処理: 適応的2値化 → Tesseract（PSM=4, OEM=1）
+ *
+ * 処理フロー:
+ * 1. 画像を最大1600pxにリサイズ（メモリ節約）
+ * 2. Otsu法で2値化（テキスト/背景を鮮明分離）
+ * 3. Tesseract.js jpn+eng で OCR（日本語+英数字）
+ * 4. parseReceiptText でレシート情報を抽出
  */
 export function useOCR() {
   const [state, setState] = useState<OcrState>({
     status: "idle",
     parsed: null,
+    rawText: null,
     imageUrl: null,
     error: null,
     progress: 0,
   });
 
   const analyze = async (file: File) => {
-    setState({ status: "analyzing", parsed: null, imageUrl: null, error: null, progress: 0 });
+    setState({ status: "analyzing", parsed: null, rawText: null, imageUrl: null, error: null, progress: 0 });
 
     try {
-      // ---- Step 1: 画像前処理（適応的2値化・拡大）----
+      // ---- Step 1: 画像前処理（リサイズ + Otsu 2値化）----
       setState((prev) => ({ ...prev, progress: 3 }));
       let processedDataUrl: string;
       try {
         processedDataUrl = await preprocessForOCR(file);
-      } catch {
-        // 前処理失敗時はオリジナルをそのまま使う
+        setState((prev) => ({ ...prev, progress: 10 }));
+      } catch (prepErr) {
+        console.warn("[useOCR] Preprocessing failed, using original:", prepErr);
         processedDataUrl = URL.createObjectURL(file);
+        setState((prev) => ({ ...prev, progress: 10 }));
       }
-      setState((prev) => ({ ...prev, progress: 8 }));
 
-      // ---- Step 2: Tesseract.js OCR ----
-      const { createWorker } = await import("tesseract.js");
+      // ---- Step 2: Tesseract.js OCR（日本語 + 英数字）----
+      const { createWorker, PSM } = await import("tesseract.js");
 
-      const worker = await createWorker("jpn", 1, {
+      // jpn+eng: 日本語テキスト + 数字・記号の精度向上
+      const worker = await createWorker("jpn+eng", 1, {
         logger: (m: { status: string; progress: number }) => {
           if (m.status === "recognizing text") {
             setState((prev) => ({
               ...prev,
-              progress: 10 + Math.round(m.progress * 80),
+              progress: 15 + Math.round(m.progress * 75),
             }));
           }
         },
       });
 
-      // PSM.SINGLE_COLUMN (4): 単一カラムのテキスト（レシートに最適）
-      const { PSM } = await import("tesseract.js");
+      // PSM.SINGLE_COLUMN: 縦長1カラムのレシートに最適
       await worker.setParameters({
         tessedit_pageseg_mode: PSM.SINGLE_COLUMN,
       });
@@ -67,10 +75,10 @@ export function useOCR() {
       const { data } = await worker.recognize(processedDataUrl);
       await worker.terminate();
 
-      console.log("[useOCR] Raw OCR text:\n", data.text.slice(0, 600));
+      console.log("[useOCR] Raw OCR text:\n", data.text);
+      setState((prev) => ({ ...prev, progress: 92 }));
 
       // ---- Step 3: 画像をサーバーに保存（失敗しても続行）----
-      setState((prev) => ({ ...prev, progress: 92 }));
       let imageUrl: string | null = null;
       try {
         const fd = new FormData();
@@ -84,16 +92,16 @@ export function useOCR() {
       const parsed = parseReceiptText(data.text);
       console.log("[useOCR] Parsed:", parsed);
 
-      setState({ status: "done", parsed, imageUrl, error: null, progress: 100 });
+      setState({ status: "done", parsed, rawText: data.text, imageUrl, error: null, progress: 100 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "OCRエラーが発生しました";
       console.error("[useOCR] Error:", err);
-      setState({ status: "error", parsed: null, imageUrl: null, error: msg, progress: 0 });
+      setState({ status: "error", parsed: null, rawText: null, imageUrl: null, error: msg, progress: 0 });
     }
   };
 
   const reset = () =>
-    setState({ status: "idle", parsed: null, imageUrl: null, error: null, progress: 0 });
+    setState({ status: "idle", parsed: null, rawText: null, imageUrl: null, error: null, progress: 0 });
 
   return { ...state, analyze, reset };
 }

@@ -123,6 +123,7 @@ export default function Home() {
             ) : (
               <OCRResultSection
                 parsed={ocr.parsed!}
+                rawText={ocr.rawText}
                 imageUrl={ocr.imageUrl}
                 onSave={handleSave}
                 onCancel={handleCancel}
